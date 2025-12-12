@@ -37,4 +37,6 @@
   command = /opt/homebrew/bin/spaceman-diff
 
 [init]
-	defaultBranch = main
+	defaultBranch = develop
+[pull]
+	rebase = false

@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Usage: ./git-foreign-commit <public_repo_url> <commit_hash>
+
+set -e
+
+if [ "$#" -ne 2 ]; then
+  echo "Usage: $0 <public_repo_url> <commit_hash>"
+  exit 1
+fi
+
+REPO_URL="$1"
+COMMIT_HASH="$2"
+TEMP_DIR=$(mktemp -d)
+PATCH_NAME="0001-temp.patch"
+
+ORIGINAL_DIR=$(pwd)
+
+echo "Cloning public repo..."
+git clone "$REPO_URL" "$TEMP_DIR"
+
+cd "$TEMP_DIR"
+echo "Creating patch from commit $COMMIT_HASH..."
+git format-patch -1 "$COMMIT_HASH" -o .
+
+PATCH_FILE=$(ls 0001-*.patch)
+cp "$PATCH_FILE" "$ORIGINAL_DIR/0001-temp.patch"
+
+cd "$ORIGINAL_DIR"
+rm -rf "$TEMP_DIR"
+
+echo "Applying patch..."
+git am 0001-temp.patch
+rm 0001-temp.patch
+
+echo "✅ Commit applied successfully!"
