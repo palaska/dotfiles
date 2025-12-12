@@ -1,0 +1,6 @@
+ssh-stabl() {
+  local region=$1
+  local ip=$2
+  ssh-keyscan -H "$ip" >> ~/.ssh/known_hosts
+  ssh -i "~/Documents/pems/stabl-${region}.pem" ec2-user@"$ip"
+}
