@@ -2,6 +2,13 @@
 unbind "["
 bind Escape copy-mode
 
+# Scrolling will enter tmux's copy mode and scroll through the buffer
+set -g mouse on
+set -g terminal-overrides 'xterm*:smcup@:rmcup@'
+
+# bind -T copy-mode-vi WheelUpPane send-keys -N 1 -X scroll-up
+# bind -T copy-mode-vi WheelDownPane send-keys -N 1 -X scroll-down
+
 # p = paste
 unbind p
 bind p paste-buffer
