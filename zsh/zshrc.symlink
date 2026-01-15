@@ -91,12 +91,24 @@ export PATH="$PATH:/Users/barispalaska/.lmstudio/bin"
 # End of LM Studio CLI section
 
 
+if command -v tmux &> /dev/null && [ -z "$TMUX" ]; then
+    tmux attach || tmux new
+fi
+if command -v wt >/dev/null 2>&1; then eval "$(command wt config shell init zsh)"; fi
+
 # The next line updates PATH for the Google Cloud SDK.
 if [ -f '/Users/barispalaska/google-cloud-sdk/path.zsh.inc' ]; then . '/Users/barispalaska/google-cloud-sdk/path.zsh.inc'; fi
 
 # The next line enables shell command completion for gcloud.
 if [ -f '/Users/barispalaska/google-cloud-sdk/completion.zsh.inc' ]; then . '/Users/barispalaska/google-cloud-sdk/completion.zsh.inc'; fi
 
-if command -v tmux &> /dev/null && [ -z "$TMUX" ]; then
-    tmux attach || tmux new
-fi
+precmd() {
+  # Skip rename if window name starts with * (pinned)
+  local current_name=$(tmux display-message -p '#W' 2>/dev/null)
+  [[ "$current_name" == \** ]] && return
+  echo -ne "\033k$(git branch --show-current 2>/dev/null || echo ${PWD##*/})\033\\"
+}
+
+# The next line updates PATH for Nebius CLI.
+if [ -f '/Users/barispalaska/.nebius/path.zsh.inc' ]; then source '/Users/barispalaska/.nebius/path.zsh.inc'; fi
+if [ -f ~/.nebius/completion.zsh.inc ]; then source ~/.nebius/completion.zsh.inc; fi
