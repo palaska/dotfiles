@@ -112,3 +112,5 @@ precmd() {
 # The next line updates PATH for Nebius CLI.
 if [ -f '/Users/barispalaska/.nebius/path.zsh.inc' ]; then source '/Users/barispalaska/.nebius/path.zsh.inc'; fi
 if [ -f ~/.nebius/completion.zsh.inc ]; then source ~/.nebius/completion.zsh.inc; fi
+
+export SSH_AUTH_SOCK=~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock

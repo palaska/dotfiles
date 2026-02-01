@@ -47,6 +47,8 @@ bind-key -T copy-mode-vi C-k send-keys -X halfpage-up
 # # Copy/paste with v/y
 bind-key -T copy-mode-vi v send-keys -X begin-selection
 bind-key -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "pbcopy"
+# Don't exit copy mode when releasing mouse after selection
+unbind -T copy-mode-vi MouseDragEnd1Pane
 # bind-key -t vi-copy y copy-pipe "reattach-to-user-namespace pbcopy"
 
 # unbind -t vi-copy Enter
@@ -117,5 +119,11 @@ set -g status-right ""
 
 set -g window-status-format '#[fg=colour4,bg=colour234,nobold,noitalics,nounderscore] #I| #[fg=colour14,bg=colour234,bold,noitalics,nounderscore]#W  '
 set -g window-status-current-format '#[fg=colour231,bg=colour14,nobold,noitalics,nounderscore]  #I| #[fg=colour231,bg=colour14,bold,noitalics,nounderscore]#W  '
+
+# Distinguish active pane from inactive panes
+set -g pane-border-style "fg=colour238"
+set -g pane-active-border-style "fg=colour4"
+set -g pane-border-status top
+set -g pane-border-format "#{?pane_active,#[fg=colour4] ● #P ,#[fg=colour238] · #P }"
 
 set -g allow-rename on
