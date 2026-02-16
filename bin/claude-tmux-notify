@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# claude-tmux-notify - Update tmux window tab to reflect Claude Code state
+#
+# Called by Claude Code hooks to make the window tab in the status bar:
+#   - Blink green when Claude is done (idle)
+#   - Blink orange when Claude has a question or needs permission
+#   - Return to normal when the user submits a new prompt
+#
+# Usage: claude-tmux-notify <done|question|clear>
+
+set -euo pipefail
+
+STATE="${1:-clear}"
+
+# Only run inside tmux
+[[ -z "${TMUX:-}" ]] && exit 0
+[[ -z "${TMUX_PANE:-}" ]] && exit 0
+
+case "$STATE" in
+  done)
+    tmux set-option -w -t "$TMUX_PANE" window-status-format \
+      '#[fg=colour16,bg=colour2,bold,blink] #I| #W  '
+    tmux set-option -w -t "$TMUX_PANE" window-status-current-format \
+      '#[fg=colour16,bg=colour2,bold]  #I| #W  '
+    ;;
+  question)
+    tmux set-option -w -t "$TMUX_PANE" window-status-format \
+      '#[fg=colour16,bg=colour208,bold,blink] #I| #W  '
+    tmux set-option -w -t "$TMUX_PANE" window-status-current-format \
+      '#[fg=colour16,bg=colour208,bold]  #I| #W  '
+    ;;
+  clear)
+    tmux set-option -wu -t "$TMUX_PANE" window-status-format 2>/dev/null || true
+    tmux set-option -wu -t "$TMUX_PANE" window-status-current-format 2>/dev/null || true
+    ;;
+esac
