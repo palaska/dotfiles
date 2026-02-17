@@ -129,4 +129,5 @@ set -g pane-border-format "#{?pane_active,#[fg=yellow] ⬇  #P ⬇  ━━━━
 set -g allow-rename on
 
 # Claude Code notification: clear window highlight when switching to it
-set-hook -g after-select-window 'run-shell "tmux set-option -wu window-status-format 2>/dev/null; tmux set-option -wu window-status-current-format 2>/dev/null; true"'
+set-hook -g after-select-window 'set-option -qwu window-status-format ; set-option -qwu window-status-current-format'
+bind w choose-tree -Zw 'select-window -t "%%" ; set-option -qwu window-status-format ; set-option -qwu window-status-current-format'
