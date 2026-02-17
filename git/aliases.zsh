@@ -28,4 +28,4 @@ alias gacs='git add -A && git commit -s -m'
 alias ge='git-edit-new'
 
 # Worktrunk - force delete a worktree
-alias wtd='worktrunk remove -f'
+alias wtd='wt remove -f'
