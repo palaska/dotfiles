@@ -131,3 +131,7 @@ set -g allow-rename on
 # Claude Code notification: clear window highlight when switching to it
 set-hook -g after-select-window 'set-option -qwu window-status-format ; set-option -qwu window-status-current-format'
 bind w choose-tree -Zw 'select-window -t "%%" ; set-option -qwu window-status-format ; set-option -qwu window-status-current-format'
+
+# Ctrl+Shift+Left/Right - move tmux window
+bind-key -n C-S-Left swap-window -d -t -1
+bind-key -n C-S-Right swap-window -d -t +1
