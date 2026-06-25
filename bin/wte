@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+#
+# wte - "worktrunk extended": helpers for working across all worktrees of a repo.
+#
+# Subcommands:
+#   wte execute [-j N] <command> [args...]   run a command in every worktree
+#   wte orphan                               find & clear orphaned worktree dirs
+#
+# "execute" discovers worktrees via `git worktree list`, so only trees actually
+# registered with git are visited. "orphan" finds the inverse: sibling
+# directories sharing the main worktree's name prefix that are NOT registered
+# (left behind after a worktree dir was deleted or moved out of git's tracking).
+#
+# Run `wte help` for details.
+
+set -uo pipefail
+
+# Colors only when stderr is a terminal.
+if [ -t 2 ]; then
+  C_BOLD=$'\033[1m'; C_RED=$'\033[31m'; C_GRN=$'\033[32m'; C_YEL=$'\033[33m'; C_DIM=$'\033[2m'; C_RST=$'\033[0m'
+else
+  C_BOLD=; C_RED=; C_GRN=; C_YEL=; C_DIM=; C_RST=
+fi
+
+usage() {
+  cat >&2 <<'EOF'
+wte - worktrunk extended
+
+Usage:
+  wte execute [-j N] <command> [args...]   Run a command in every git worktree.
+      -j N   max worktrees in parallel (default: $WTR_JOBS or CPU count).
+             Use -j 1 for sequential, live-streamed output.
+
+  wte orphan                               Interactively clear orphaned dirs:
+                                           sibling directories with the main
+                                           worktree's prefix that git no longer
+                                           tracks. Checkbox select, then delete.
+
+Examples:
+  wte execute cargo clean
+  wte execute -j 4 git fetch
+  wte execute -- git status -s     # use -- if the command starts with a flag
+  wte orphan
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# wte execute
+# ---------------------------------------------------------------------------
+cmd_execute() {
+  local max=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -j)  max="$2"; shift 2 ;;
+      -j*) max="${1#-j}"; shift ;;
+      --)  shift; break ;;
+      *)   break ;;
+    esac
+  done
+
+  if [ "$#" -eq 0 ]; then echo "usage: wte execute [-j N] <command> [args...]" >&2; exit 64; fi
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "wte: not inside a git repository" >&2; exit 1
+  fi
+  : "${max:=${WTR_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}}"
+
+  local -a worktrees=()
+  local line
+  while IFS= read -r line; do
+    case "$line" in "worktree "*) worktrees+=("${line#worktree }") ;; esac
+  done < <(git worktree list --porcelain)
+  local total=${#worktrees[@]}
+  local -a failed=()
+
+  if [ "$max" -le 1 ]; then
+    local i=0 wt
+    for wt in "${worktrees[@]}"; do
+      i=$((i + 1))
+      printf '\n%s[%d/%d] ==> %s%s\n' "$C_BOLD" "$i" "$total" "$wt" "$C_RST"
+      ( cd "$wt" && "$@" ) || failed+=("$wt")
+    done
+  else
+    # Global (not local): the EXIT trap fires after this function returns, so the
+    # variable must still be in scope then. ${tmpdir:-} keeps it safe under set -u.
+    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/wte.XXXXXX")"
+    trap 'rm -rf "${tmpdir:-}"' EXIT
+    local -a pids=() outs=() reaped=()
+    local started=0 running=0 done_count=0 failcount=0 tick=0 i j out rc
+    local spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+
+    draw() {
+      [ -t 2 ] || return
+      local f=${spin[$((tick % ${#spin[@]}))]}
+      printf '\r\033[K%s %d/%d done · %d running · %s%d failed%s' \
+        "$f" "$done_count" "$total" "$running" "$C_RED" "$failcount" "$C_RST" >&2
+      tick=$((tick + 1))
+    }
+    finish() {
+      local k="$1" r; r=$(cat "$tmpdir/$k.rc" 2>/dev/null || echo 1)
+      local mark="${C_GRN}✓${C_RST}"
+      if [ "$r" -ne 0 ]; then mark="${C_RED}✗${C_RST}"; failed+=("${worktrees[$k]}"); failcount=$((failcount + 1)); fi
+      [ -t 2 ] && printf '\r\033[K' >&2
+      printf '%s %s\n' "$mark" "${worktrees[$k]##*/}" >&2
+    }
+
+    while [ "$done_count" -lt "$total" ]; do
+      while [ "$running" -lt "$max" ] && [ "$started" -lt "$total" ]; do
+        i=$started; out="$tmpdir/$i.log"; outs[$i]="$out"
+        ( cd "${worktrees[$i]}" && "$@" ) >"$out" 2>&1; echo $? > "$tmpdir/$i.rc" &
+        pids[$i]=$!; started=$((started + 1)); running=$((running + 1))
+      done
+      j=0
+      while [ "$j" -lt "$started" ]; do
+        if [ -z "${reaped[$j]:-}" ] && [ -f "$tmpdir/$j.rc" ]; then
+          reaped[$j]=1; running=$((running - 1)); done_count=$((done_count + 1)); finish "$j"
+        fi
+        j=$((j + 1))
+      done
+      draw
+      [ "$done_count" -lt "$total" ] && sleep 0.1
+    done
+    wait 2>/dev/null
+    [ -t 2 ] && printf '\r\033[K' >&2
+    for i in $(seq 0 $((total - 1))); do
+      printf '\n%s==> %s%s\n' "$C_BOLD" "${worktrees[$i]}" "$C_RST"
+      cat "${outs[$i]}"
+    done
+  fi
+
+  if [ "${#failed[@]}" -gt 0 ]; then
+    printf '\n%s%d worktree(s) failed:%s\n' "$C_RED" "${#failed[@]}" "$C_RST" >&2
+    printf '  %s\n' "${failed[@]}" >&2
+    exit 1
+  fi
+  printf '\n%s✓ %d worktree(s) ok%s\n' "$C_GRN" "$total" "$C_RST" >&2
+}
+
+# ---------------------------------------------------------------------------
+# Checkbox TUI: reads/draws on /dev/tty so it works even when stdout is piped.
+# Input:  TUI_ITEMS (array of display strings)
+# Output: SELECTED  (array of chosen indices); returns 1 if cancelled.
+# Keys: ↑/↓ or j/k move · space toggle · a toggle-all · enter confirm · q/esc cancel
+# ---------------------------------------------------------------------------
+select_tui() {
+  SELECTED=()
+  local n=${#TUI_ITEMS[@]}
+  [ "$n" -eq 0 ] && return 1
+  if [ ! -r /dev/tty ] || [ ! -t 1 ] && [ ! -w /dev/tty ]; then
+    echo "wte: orphan needs an interactive terminal" >&2; return 2
+  fi
+
+  local -a checked; local i
+  for ((i = 0; i < n; i++)); do checked[i]=0; done
+  local cur=0 top=0 key rest rows view ret=0 quit=0
+
+  tput smcup >/dev/tty 2>/dev/null
+  printf '\033[?25l' >/dev/tty   # hide cursor
+
+  while [ "$quit" -eq 0 ]; do
+    rows=$(tput lines </dev/tty 2>/dev/null || echo 24)
+    view=$((rows - 4)); [ "$view" -lt 3 ] && view=3
+    ((cur < top)) && top=$cur
+    ((cur >= top + view)) && top=$((cur - view + 1))
+
+    local count=0
+    for ((i = 0; i < n; i++)); do ((checked[i])) && count=$((count + 1)); done
+
+    printf '\033[H\033[J' >/dev/tty
+    printf '%s  Select orphaned directories to delete%s   %s(%d/%d marked)%s\n\n' \
+      "$C_BOLD" "$C_RST" "$C_DIM" "$count" "$n" "$C_RST" >/dev/tty
+
+    local idx
+    for ((idx = top; idx < top + view && idx < n; idx++)); do
+      local pointer="  " box="[ ]"
+      ((idx == cur)) && pointer="${C_YEL}❯ ${C_RST}"
+      ((checked[idx])) && box="${C_GRN}[x]${C_RST}"
+      printf '%s%s %s\n' "$pointer" "$box" "${TUI_ITEMS[$idx]}" >/dev/tty
+    done
+
+    printf '\n%s  ↑/↓ move · space toggle · a all · enter confirm · q cancel%s' \
+      "$C_DIM" "$C_RST" >/dev/tty
+
+    IFS= read -rsn1 key </dev/tty || { ret=1; break; }
+    case "$key" in
+      $'\x1b')
+        # Read the rest of the escape sequence one byte at a time. A bare ESC
+        # (nothing follows within the timeout) cancels; arrow keys arrive as
+        # ESC [ A/B or ESC O A/B; any other sequence is ignored, not cancelled.
+        if ! read -rsn1 -t 1 rest </dev/tty; then
+          ret=1; quit=1                       # lone ESC (waits 1s; bash 3.2 has no sub-second -t)
+        elif [ "$rest" = "[" ] || [ "$rest" = "O" ]; then
+          read -rsn1 -t 1 rest </dev/tty || rest=""
+          case "$rest" in
+            A) ((cur > 0)) && cur=$((cur - 1)) ;;
+            B) ((cur < n - 1)) && cur=$((cur + 1)) ;;
+          esac
+        fi ;;
+      k) ((cur > 0)) && cur=$((cur - 1)) ;;
+      j) ((cur < n - 1)) && cur=$((cur + 1)) ;;
+      ' ') checked[cur]=$((1 - checked[cur])) ;;
+      a)  # toggle all: if every box is checked, clear; else set all
+          local allset=1
+          for ((i = 0; i < n; i++)); do ((checked[i])) || { allset=0; break; }; done
+          for ((i = 0; i < n; i++)); do checked[i]=$((1 - allset)); done ;;
+      q)  ret=1; quit=1 ;;
+      ''|$'\r')  # Enter = confirm
+          for ((i = 0; i < n; i++)); do ((checked[i])) && SELECTED+=("$i"); done
+          quit=1 ;;
+    esac
+  done
+
+  printf '\033[?25h' >/dev/tty            # show cursor
+  tput rmcup >/dev/tty 2>/dev/null        # leave alternate screen
+  return "$ret"
+}
+
+# ---------------------------------------------------------------------------
+# wte orphan
+# ---------------------------------------------------------------------------
+cmd_orphan() {
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "wte: not inside a git repository" >&2; exit 1
+  fi
+
+  # Registered worktree paths + the main worktree (first porcelain entry).
+  local -a registered=()
+  local line main=""
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) registered+=("${line#worktree }"); [ -z "$main" ] && main="${line#worktree }" ;;
+    esac
+  done < <(git worktree list --porcelain)
+
+  local parent prefix
+  parent="$(dirname "$main")"
+  prefix="$(basename "$main")"
+
+  is_registered() { printf '%s\n' "${registered[@]}" | grep -Fxq -- "$1"; }
+
+  # Candidates: sibling dirs named "<prefix>.*" that git does not track.
+  local -a orphan_paths=() orphan_disp=()
+  local d mtime
+  shopt -s nullglob
+  for d in "$parent/$prefix".*; do
+    [ -d "$d" ] || continue
+    is_registered "$d" && continue
+    orphan_paths+=("$d")
+  done
+  shopt -u nullglob
+
+  if [ "${#orphan_paths[@]}" -eq 0 ]; then
+    printf '%s✓ No orphaned directories under %s%s\n' "$C_GRN" "$parent" "$C_RST" >&2
+    return 0
+  fi
+
+  # Build display rows: mtime + name (sizes are computed later, only for the
+  # selected subset, to keep the listing instant).
+  local -a TUI_ITEMS=()
+  for d in "${orphan_paths[@]}"; do
+    mtime="$(stat -f '%Sm' -t '%Y-%m-%d' "$d" 2>/dev/null || echo '----------')"
+    TUI_ITEMS+=("$(printf '%s  %s' "$mtime" "${d##*/}")")
+  done
+
+  local -a SELECTED=()
+  select_tui
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then echo "wte: cancelled, nothing deleted." >&2; return 0; fi
+  if [ "${#SELECTED[@]}" -eq 0 ]; then echo "wte: nothing selected." >&2; return 0; fi
+
+  local -a del=()
+  local idx
+  for idx in "${SELECTED[@]}"; do del+=("${orphan_paths[$idx]}"); done
+
+  printf '\n%sComputing sizes…%s\n' "$C_DIM" "$C_RST" >&2
+  du -shc "${del[@]}" 2>/dev/null | sed "s/^/  /" >&2
+
+  printf '\n%sDelete these %d director%s? [y/N] %s' \
+    "$C_RED" "${#del[@]}" "$([ ${#del[@]} -eq 1 ] && echo y || echo ies)" "$C_RST" >&2
+  local ans; read -r ans </dev/tty || ans=""
+  case "$ans" in
+    [yY]|[yY][eE][sS]) ;;
+    *) echo "wte: aborted, nothing deleted." >&2; return 0 ;;
+  esac
+
+  local p
+  for p in "${del[@]}"; do
+    if rm -rf -- "$p"; then printf '%s✓ removed%s %s\n' "$C_GRN" "$C_RST" "$p" >&2
+    else printf '%s✗ failed%s %s\n' "$C_RED" "$C_RST" "$p" >&2; fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# dispatch
+# ---------------------------------------------------------------------------
+case "${1:-}" in
+  execute|exec|run) shift; cmd_execute "$@" ;;
+  orphan|orphans)   shift; cmd_orphan "$@" ;;
+  ""|-h|--help|help) usage; [ "${1:-}" = "" ] && exit 64 || exit 0 ;;
+  *) printf '%swte: unknown subcommand '\''%s'\''%s\n\n' "$C_RED" "$1" "$C_RST" >&2; usage; exit 64 ;;
+esac
