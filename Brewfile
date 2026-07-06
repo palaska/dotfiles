@@ -15,6 +15,7 @@ brew 'spark'
 brew 'temporal'
 brew 'wget'
 brew 'yt-dlp'
+brew 'worktrunk'
 
 # cask 'vlc'
 # cask '1password'
