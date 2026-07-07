@@ -1,6 +1,7 @@
 cask_args appdir: '/Applications'
 
 # tap 'homebrew/brew'
+tap 'jurplel/tap'
 
 brew 'atuin'
 brew 'cloudflared'
@@ -8,6 +9,8 @@ brew 'gh'
 brew 'imagemagick'
 brew 'postgresql@17'
 brew 'protobuf'
+brew 'pyenv'
+brew 'pyenv-virtualenv'
 brew 'redis'
 brew 'ruby-build'
 brew 'spaceman-diff'
@@ -16,6 +19,8 @@ brew 'temporal'
 brew 'wget'
 brew 'yt-dlp'
 brew 'worktrunk'
+
+cask 'instant-space-switcher'
 
 # cask 'vlc'
 # cask '1password'
